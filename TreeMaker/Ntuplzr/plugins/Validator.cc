@@ -96,7 +96,7 @@ const Int_t kMaxMuonLoose = 200;
 const Int_t kMaxJet = 800;
 const Int_t kMaxTau = 200;
 const Int_t kMaxMissingET = 1;
-
+const Int_t kMaxTauTrack = kMaxTau*100;
 
 class Validator : public edm::one::EDAnalyzer<edm::one::SharedResources>  {
 public:
@@ -115,6 +115,11 @@ private:
   
   bool isME0MuonSelNew(reco::Muon, double, double, double, edm::EventSetup const& );
   float calculate_demetraIsolation(const pat::Tau&) const;
+  float customTauIsolation(const pat::Tau&, bool applyTiming, reco::Vertex tau_vertex, reco::Vertex tau_vertex4D) const;
+  float correctedTauIsolation(const pat::Tau&, bool applytiming, reco::Vertex tau_vertex, reco::Vertex tau_vertex4D, float CombRelIso) const;
+  float AgainstLeadTrackTauIsolation(const pat::Tau& tau, bool applytiming, reco::Vertex tau_vertex) const;
+  int fillNDeltas (const pat::Tau&,bool applytiming, reco::Vertex tau_vertex, reco::Vertex tau_vertex4D, int* tau_deltas_track, int cdeltas);
+  
   bool debug_, extendFormat_;
   edm::Service<TFileService> fs_;
   edm::EDGetTokenT<std::vector<reco::Vertex>>         verticesToken_     ;
@@ -138,6 +143,9 @@ private:
   const ME0Geometry*      ME0Geometry_;
   
   TTree* mytree;
+  TH1F* myhisto;// = new TH1F("myHist","myHist",400,-20,20);
+  TH1F* myhistoTimes;// = new TH1F("myHist","myHist",400,-20,20);
+  TH1F* histFailed4Dv;
   int evt_size;
   
   int vtx_size;
@@ -155,7 +163,8 @@ private:
 
   int npuVertices;
   float trueInteractions; 
-  
+  float PUrho;
+
   int genpart_size;
   float genpart_pt[kMaxParticle],genpart_eta[kMaxParticle],genpart_phi[kMaxParticle],genpart_mass[kMaxParticle];
   int genpart_pid[kMaxParticle], genpart_status[kMaxParticle], genpart_m1[kMaxParticle], genpart_m2[kMaxParticle], genpart_d1[kMaxParticle], genpart_d2[kMaxParticle] ;
@@ -178,9 +187,11 @@ private:
   float muon_pt[kMaxMuonLoose], muon_eta[kMaxMuonLoose], muon_phi[kMaxMuonLoose], muon_reliso[kMaxMuonLoose], muon_mass[kMaxMuonLoose], muon_idvar[kMaxMuonLoose];
   uint32_t muon_isopass[kMaxMuonLoose], muon_idpass[kMaxMuonLoose] ;
 
-  int tau_size, tau_charge[kMaxTau];
-  float tau_decaymode[kMaxTau], tau_neutraliso[kMaxTau], tau_chargediso[kMaxTau], tau_combinediso[kMaxTau], tau_pt[kMaxTau], tau_eta[kMaxTau], tau_phi[kMaxTau], tau_mass[kMaxTau]; 
+  int tau_size, tau_track_size,tau_charge[kMaxTau];
+  float tau_decaymode[kMaxTau], tau_neutraliso[kMaxTau], tau_chargediso[kMaxTau], tau_combinediso[kMaxTau], tau_pt[kMaxTau], tau_eta[kMaxTau], tau_phi[kMaxTau], tau_mass[kMaxTau], tau_t[kMaxTau], tau_terr[kMaxTau], tau_dr_match[kMaxTau]; 
+  float tau_customIso[kMaxTau], tau_customIsot[kMaxTau], tau_correctedIso[kMaxTau], tau_genMatch[kMaxTau], tau_againstlead[kMaxTau];
   uint32_t tau_isopass[kMaxTau];
+  int tau_deltas_track[kMaxTauTrack];
   
   int jetpuppi_size; 
   float jetpuppi_pt[kMaxJet], jetpuppi_eta[kMaxJet], jetpuppi_phi[kMaxJet], jetpuppi_mass[kMaxJet];
@@ -231,6 +242,9 @@ Validator::Validator(const edm::ParameterSet& iConfig):
     evt_size     = 0;
     usesResource("TFileService");
     mytree   = fs_->make<TTree>("mytree","TestTree");
+    myhisto  = fs_->make<TH1F>("myHist","nDeltaHist",400,-20,20);
+    myhistoTimes  = fs_->make<TH1F>("myHistoTimes","trackTime",1000,-1,5);
+    histFailed4Dv   = fs_->make<TH1F>("histFailed4Dv","no4Dvertex",1,0,1);
     mytree->Branch("evt_size",&evt_size, "evt_size/I");
 
     mytree->Branch("vtx_size",&vtx_size, "vtx_size/I");
@@ -263,6 +277,7 @@ Validator::Validator(const edm::ParameterSet& iConfig):
 
     mytree->Branch("npuVertices",&npuVertices, "npuVertices/I");
     mytree->Branch("trueInteractions",&trueInteractions, "trueInteractions/F");
+    mytree->Branch("PUrho",&PUrho, "PUrho/F");
     
     mytree->Branch("genpart_size",&genpart_size, "genpart_size/I");
     mytree->Branch("genpart_pid", genpart_pid, "genpart_pid[genpart_size]/I");
@@ -286,50 +301,62 @@ Validator::Validator(const edm::ParameterSet& iConfig):
     mytree->Branch("genmet_pt", genmet_pt, "genmet_pt[genmet_size]/F");
     mytree->Branch("genmet_phi",genmet_phi, "genmet_phi[genmet_size]/F");
     
-    mytree->Branch("gamma_size",&gamma_size, "gamma_size/I");
-    mytree->Branch("gamma_pt",gamma_pt, "gamma_pt[gamma_size]/F");
-    mytree->Branch("gamma_eta",gamma_eta, "gamma_eta[gamma_size]/F");
-    mytree->Branch("gamma_phi",gamma_phi, "gamma_phi[gamma_size]/F");
-    mytree->Branch("gamma_mass",gamma_mass, "gamma_mass[gamma_size]/F");
-    mytree->Branch("gamma_idvar", gamma_idvar, "gamma_idvar[gamma_size]/F");
-    mytree->Branch("gamma_reliso",gamma_reliso, "gamma_reliso[gamma_size]/F");
-    mytree->Branch("gamma_idpass", gamma_idpass, "gamma_idpass[gamma_size]/i");
-    mytree->Branch("gamma_isopass", gamma_isopass, "gamma_isopass[gamma_size]/i");
-    
-    mytree->Branch("elec_size",&elec_size, "elec_size/I");
-    mytree->Branch("elec_pt",elec_pt, "elec_pt[elec_size]/F");
-    mytree->Branch("elec_eta",elec_eta, "elec_eta[elec_size]/F");
-    mytree->Branch("elec_phi",elec_phi, "elec_phi[elec_size]/F");
-    mytree->Branch("elec_mass",elec_mass, "elec_mass[elec_size]/F");
-    mytree->Branch("elec_charge",elec_charge, "elec_charge[elec_size]/I");
-    mytree->Branch("elec_idvar", elec_idvar, "elec_idvar[elec_size]/F");
-    mytree->Branch("elec_reliso",elec_reliso, "elec_reliso[elec_size]/F");
-    mytree->Branch("elec_idpass",elec_idpass, "elec_idpass[elec_size]/i");
-    mytree->Branch("elec_isopass", elec_isopass, "elec_isopass[elec_size]/i");
-    
-    mytree->Branch("muon_size",&muon_size, "muon_size/I");
-    mytree->Branch("muon_pt",muon_pt, "muon_pt[muon_size]/F");
-    mytree->Branch("muon_eta",muon_eta, "muon_eta[muon_size]/F");
-    mytree->Branch("muon_phi",muon_phi, "muon_phi[muon_size]/F");
-    mytree->Branch("muon_mass",muon_mass, "muon_mass[muon_size]/F");
-    mytree->Branch("muon_charge",muon_charge, "muon_charge[muon_size]/I");
-    mytree->Branch("muon_idvar", muon_idvar, "muon_idvar[muon_size]/F");
-    mytree->Branch("muon_reliso",muon_reliso, "muon_reliso[muon_size]/F");
-    mytree->Branch("muon_idpass", muon_idpass, "muon_idpass[muon_size]/i");
-    mytree->Branch("muon_isopass", muon_isopass, "muon_isopass[muon_size]/i");
+//    mytree->Branch("gamma_size",&gamma_size, "gamma_size/I");
+//    mytree->Branch("gamma_pt",gamma_pt, "gamma_pt[gamma_size]/F");
+//    mytree->Branch("gamma_eta",gamma_eta, "gamma_eta[gamma_size]/F");
+//    mytree->Branch("gamma_phi",gamma_phi, "gamma_phi[gamma_size]/F");
+//    mytree->Branch("gamma_mass",gamma_mass, "gamma_mass[gamma_size]/F");
+//    mytree->Branch("gamma_idvar", gamma_idvar, "gamma_idvar[gamma_size]/F");
+//    mytree->Branch("gamma_reliso",gamma_reliso, "gamma_reliso[gamma_size]/F");
+//    mytree->Branch("gamma_idpass", gamma_idpass, "gamma_idpass[gamma_size]/i");
+//    mytree->Branch("gamma_isopass", gamma_isopass, "gamma_isopass[gamma_size]/i");
+//    
+//    mytree->Branch("elec_size",&elec_size, "elec_size/I");
+//    mytree->Branch("elec_pt",elec_pt, "elec_pt[elec_size]/F");
+//    mytree->Branch("elec_eta",elec_eta, "elec_eta[elec_size]/F");
+//    mytree->Branch("elec_phi",elec_phi, "elec_phi[elec_size]/F");
+//    mytree->Branch("elec_mass",elec_mass, "elec_mass[elec_size]/F");
+//    mytree->Branch("elec_charge",elec_charge, "elec_charge[elec_size]/I");
+//    mytree->Branch("elec_idvar", elec_idvar, "elec_idvar[elec_size]/F");
+//    mytree->Branch("elec_reliso",elec_reliso, "elec_reliso[elec_size]/F");
+//    mytree->Branch("elec_idpass",elec_idpass, "elec_idpass[elec_size]/i");
+//    mytree->Branch("elec_isopass", elec_isopass, "elec_isopass[elec_size]/i");
+//    
+//    mytree->Branch("muon_size",&muon_size, "muon_size/I");
+//    mytree->Branch("muon_pt",muon_pt, "muon_pt[muon_size]/F");
+//    mytree->Branch("muon_eta",muon_eta, "muon_eta[muon_size]/F");
+//    mytree->Branch("muon_phi",muon_phi, "muon_phi[muon_size]/F");
+//    mytree->Branch("muon_mass",muon_mass, "muon_mass[muon_size]/F");
+//    mytree->Branch("muon_charge",muon_charge, "muon_charge[muon_size]/I");
+//    mytree->Branch("muon_idvar", muon_idvar, "muon_idvar[muon_size]/F");
+//    mytree->Branch("muon_reliso",muon_reliso, "muon_reliso[muon_size]/F");
+//    mytree->Branch("muon_idpass", muon_idpass, "muon_idpass[muon_size]/i");
+//    mytree->Branch("muon_isopass", muon_isopass, "muon_isopass[muon_size]/i");
     
     mytree->Branch("tau_size",&tau_size, "tau_size/I");
+    mytree->Branch("tau_track_size",&tau_track_size, "tau_track_size/I");
     mytree->Branch("tau_pt",tau_pt, "tau_pt[tau_size]/F");
     mytree->Branch("tau_eta",tau_eta, "tau_eta[tau_size]/F");
     mytree->Branch("tau_phi",tau_phi, "tau_phi[tau_size]/F");
     mytree->Branch("tau_mass",tau_mass, "tau_mass[tau_size]/F");
+    mytree->Branch("tau_t",tau_t, "tau_t[tau_size]/F");
+    mytree->Branch("tau_terr",tau_terr, "tau_terr[tau_size]/F");
+    mytree->Branch("tau_dr_match",tau_dr_match, "tau_dr_match[tau_size]/F");
     mytree->Branch("tau_charge",tau_charge, "tau_charge[tau_size]/I");
     mytree->Branch("tau_decaymode",tau_decaymode, "tau_decaymode[tau_size]/F");
     mytree->Branch("tau_chargediso",tau_chargediso, "tau_chargediso[tau_size]/F");
     mytree->Branch("tau_neutraliso",tau_neutraliso, "tau_neutraliso[tau_size]/F");
     mytree->Branch("tau_combinediso",tau_combinediso, "tau_combinediso[tau_size]/F");
     mytree->Branch("tau_isopass", tau_isopass, "tau_isopass[tau_size]/i");
-    
+    mytree->Branch("tau_customIso",tau_customIso, "tau_customIso[tau_size]/F");
+    mytree->Branch("tau_customIsot",tau_customIsot, "tau_customIsot[tau_size]/F");
+    mytree->Branch("tau_correctedIso",tau_correctedIso, "tau_correctedIso[tau_size]/F");
+    mytree->Branch("tau_genMatch",tau_genMatch, "tau_genMatch[tau_size]/I");
+    mytree->Branch("tau_deltas_track",tau_deltas_track, "tau_deltas_track[tau_track_size]/I");
+    mytree->Branch("tau_againstlead",tau_againstlead, "tau_againstlead[tau_size]/F");
+
+
+
     mytree->Branch("jetpuppi_size",&jetpuppi_size, "jetpuppi_size/I");
     mytree->Branch("jetpuppi_pt",jetpuppi_pt, "jetpuppi_pt[jetpuppi_size]/F");
     mytree->Branch("jetpuppi_eta",jetpuppi_eta, "jetpuppi_eta[jetpuppi_size]/F");
@@ -441,6 +468,7 @@ Validator::analyze(const edm::Event& iEvent, const edm::EventSetup& iSetup)
   metpf_size       = 0;
   gamma_size       = 0;
   tau_size         = 0;
+  tau_track_size         = 0;
 
   if(debug_) std::cout<<"Here I am : initalised number of particles=0 in the event "<<std::endl;   
   evt_size++;
@@ -528,14 +556,34 @@ Validator::analyze(const edm::Event& iEvent, const edm::EventSetup& iSetup)
   /////////////////////////////
   //////Pileup info////////////
   /////////////////////////////
+    /*
+    float PUrho = 0;
+std::vector<PileupSummaryInfo>::const_iterator ipu;
+for (ipu = PUInfo->begin(); ipu != PUInfo->end(); ++ipu) {
+if ( ipu->getBunchCrossing() != 0 ) continue; // storing detailed PU info only for BX=0
+for (unsigned int i=0; i<ipu->getPU_zpositions().size(); ++i) {
+auto PU_z = (ipu->getPU_zpositions())[i];
+if ( std::abs(PU_z - npv_0_z_) < 1) PUrho++;
+}
+}
+
+*/
+  PUrho = 0;
+  float npv_0_z_ = vertices->at(0).z();
   std::vector<PileupSummaryInfo>::const_iterator PVI;
 
   for(PVI = PupInfo->begin(); PVI != PupInfo->end(); ++PVI) {
     if(PVI->getBunchCrossing()==  0){ 
       npuVertices   += PVI->getPU_NumInteractions(); 
-      trueInteractions = PVI->getTrueNumInteractions();  
-    }  
-  }
+      trueInteractions = PVI->getTrueNumInteractions(); 
+      for (unsigned int i=0; i<PVI->getPU_zpositions().size(); ++i) {
+        auto PU_z = (PVI->getPU_zpositions())[i];
+        if ( std::abs(PU_z - npv_0_z_) < 1) PUrho++;
+      }
+    }  // if BX0
+  }//for PUI
+  PUrho /= 20.;
+
   if(debug_)  std::cout<<"Here I am : got pileup info right "<<std::endl;
   /////////////////////////////
   //////Gen Particle info//////
@@ -630,221 +678,220 @@ Validator::analyze(const edm::Event& iEvent, const edm::EventSetup& iSetup)
        genmet_size++;
       }
 
-  /////////////////////////////
-  //Photon information         
-  /////////////////////////////                                                                                                
-  for(size_t ip= 0 ; ip < photns->size(); ip++)
-    {
-      if(photns->at(ip).pt() < 10.) continue;
-      if(fabs(photns->at(ip).eta()) > 3.) continue;
-      float mvaValue = photns->at(ip).userFloat("mvaValue");
-      bool isEB = photns->at(ip).isEB();
-      bool isLoose(0), isMedium(0), isTight(0);
-      
-      if( isEB )
-	{
-	  isLoose  = (mvaValue > 0.00);
-	  isMedium = (mvaValue > 0.2); 
-	  isTight  = (mvaValue > 0.56);
-	}     
-      else
-	{
-	  isLoose = (mvaValue > 0.20);
-	  isMedium = (mvaValue > 0.4); 
-	  isTight = (mvaValue > 0.68);
-	}          
-      
-      gamma_pt[gamma_size]        = photns->at(ip).pt();
-      gamma_eta[gamma_size]       = photns->at(ip).eta();
-      gamma_phi[gamma_size]       = photns->at(ip).phi();
-      gamma_mass[gamma_size]      = photns->at(ip).mass();
-      gamma_idvar[gamma_size]     = mvaValue; // MVA
-      gamma_reliso[gamma_size]    = 0.;
-      gamma_idpass[gamma_size]    = 0;
-      gamma_isopass[gamma_size]   = 0;
-      
-      if(isLoose)
-	gamma_idpass[gamma_size] |= 1 << 0;
-      
-      if(isMedium)
-	gamma_idpass[gamma_size] |= 1 << 1;
-      
-      if(isTight)
-	gamma_idpass[gamma_size] |= 1 << 2;
-      
-      if(gamma_reliso[gamma_size] < 0.1)
-	gamma_isopass[gamma_size] |= 1 << 0;
-      
-      if(gamma_reliso[gamma_size] < 0.2)
-	 gamma_isopass[gamma_size] |= 1 << 1;
-      
-      if(gamma_reliso[gamma_size] < 0.3)
-	gamma_isopass[gamma_size] |= 1 << 2;
-      
-      if(gamma_reliso[gamma_size] < 0.4)
-	gamma_isopass[gamma_size] |= 1 << 3;
-      
-      gamma_size++;
-      if(gamma_size>kMaxPhoton) break;
-    }
-  if(debug_)   std::cout<<"Here I am : got pho infor right "<<std::endl;
-  
-  /////////////////////////////
-  //Electron information
-  /////////////////////////////                       
-  for(size_t ie= 0 ; ie < elecs->size(); ie++)  {
-    if(elecs->at(ie).pt() < 10.) continue;
-    if (fabs(elecs->at(ie).eta()) > 3.) continue;
-    float mvaValue = elecs->at(ie).userFloat("mvaValue");
-    //float mvaValue = 1.;
-    elec_pt[elec_size]               = elecs->at(ie).pt();
-    elec_eta[elec_size]              = elecs->at(ie).eta();
-    elec_phi[elec_size]              = elecs->at(ie).phi();
-    elec_mass[elec_size]             = elecs->at(ie).mass();
-    elec_charge[elec_size]           = elecs->at(ie).charge();
-    elec_idvar[elec_size]            = mvaValue; //MVA
-    elec_idpass[elec_size]           = 0;
-    elec_isopass[elec_size]          = 0;
-    bool isEB                        = elecs->at(ie).isEB();
-    if(isEB) 
-      elec_reliso[elec_size] = (elecs->at(ie).puppiNoLeptonsChargedHadronIso() + elecs->at(ie).puppiNoLeptonsNeutralHadronIso() + elecs->at(ie).puppiNoLeptonsPhotonIso()) / elecs->at(ie).pt();
-    else 
-      elec_reliso[elec_size] = (elecs->at(ie).userFloat("hgcElectronID:caloIsoRing1") + elecs->at(ie).userFloat("hgcElectronID:caloIsoRing2") + elecs->at(ie).userFloat("hgcElectronID:caloIsoRing3") + elecs->at(ie).userFloat("hgcElectronID:caloIsoRing4")) / elecs->at(ie).energy();
-
-    bool isLoose(0), isMedium(0), isTight(0);
-    
-    if( isEB ) {
-      if (elecs->at(ie).pt() < 20.) {
-	isLoose  = (mvaValue  > -0.661);
-	isMedium = (mvaValue > 0.885);
-	isTight  = (mvaValue  > 0.986);  	
-      }
-      else {
-	isLoose  = (mvaValue  > -0.797);
-	isMedium = (mvaValue > 0.723);
-	isTight  = (mvaValue  > 0.988);
-      }
-    }
-    else {
-      if (not (elecs->at(ie).userFloat("hgcElectronID:ecEnergy") > 0)) continue;
-      if (not (elecs->at(ie).userFloat("hgcElectronID:sigmaUU") > 0)) continue;
-      if (not (elecs->at(ie).fbrem() > -1)) continue;
-      if (not (elecs->at(ie).userFloat("hgcElectronID:measuredDepth") < 40)) continue;
-      if (not (elecs->at(ie).userFloat("hgcElectronID:nLayers") > 20)) continue;
-      if (elecs->at(ie).pt() < 20.) {
-	isLoose = (mvaValue  > -0.320);
-	isMedium = (mvaValue > 0.777);
-	isTight = (mvaValue  > 0.969);
-      }
-      else {
-	isLoose  = (mvaValue  > -0.919);
-	isMedium = (mvaValue > 0.591);
-	isTight  = (mvaValue  > 0.983);
-      }
-    }
-    
-    if(isLoose)
-      //{
-	elec_idpass[elec_size] |= 1 << 0;
-	//std::cout<<"loose muon found"<<std::endl;
-    // }
-    if(isMedium)
-      elec_idpass[elec_size] |= 1 << 1;
-    
-    if(isTight)
-      elec_idpass[elec_size] |= 1 << 2;  
-    
-    if(elec_reliso[elec_size] < 0.1)
-      elec_isopass[elec_size] |= 1 << 0;
-    
-    if(elec_reliso[elec_size] < 0.2)
-      elec_isopass[elec_size] |= 1 << 1;
-    
-    if(elec_reliso[elec_size] < 0.3)
-      elec_isopass[elec_size] |= 1 << 2;
-    
-    if(elec_reliso[elec_size] < 0.4)
-      elec_isopass[elec_size] |= 1 << 3;
-    
-    elec_size++;
-    if(elec_size>kMaxElectron) break;
-  }
-  
-  //std::cout<<elec_size<<std::endl;
-  if(debug_)   std::cout<<"Here I am : got elec infor right "<<std::endl;
-
- 
-  /////////////////////////////
-  // Muon information
-  /////////////////////////////
-  for(size_t im= 0 ; im < muons->size(); im++)
-    {
-      if (muons->at(im).pt() < 2.) continue;
-      if (fabs(muons->at(im).eta()) > 2.8) continue;
-      
-      muon_pt[muon_size]               = muons->at(im).pt();
-      muon_eta[muon_size]              = muons->at(im).eta();
-      muon_phi[muon_size]              = muons->at(im).phi();
-      muon_mass[muon_size]             = muons->at(im).mass();
-      muon_charge[muon_size]           = muons->at(im).charge();
-      muon_reliso[muon_size]           = muons->at(im).trackIso()/muons->at(im).pt();
-      muon_idvar[muon_size]            = 1.0;
-      muon_idpass[muon_size]           = 0;
-      muon_isopass[muon_size]          = 0;
-      double dPhiCut = std::min(std::max(1.2/muons->at(im).p(),1.2/100),0.056);
-      double dPhiBendCut = std::min(std::max(0.2/muons->at(im).p(),0.2/100),0.0096);
-      
-      int isLoose = (int) (fabs(muons->at(im).eta()) < 2.4 && muon::isLooseMuon(muons->at(im))) || (fabs(muons->at(im).eta()) > 2.4 && isME0MuonSelNew(muons->at(im), 0.077, dPhiCut, dPhiBendCut, iSetup));
-
-      if(isLoose)
-	muon_idpass[muon_size] |= 1 << 0;
-	
-      int isMedium = isLoose;
-
-      if(isMedium)
-	muon_idpass[muon_size] |= 1 << 1;
-	      
-      
-      bool ipxy = false, ipz = false, validPxlHit = false, highPurity = false;
-      if (muons->at(im).innerTrack().isNonnull()){
-	ipxy = std::abs(muons->at(im).muonBestTrack()->dxy(vertices->at(prVtx).position())) < 0.2;
-	ipz = std::abs(muons->at(im).muonBestTrack()->dz(vertices->at(prVtx).position())) < 0.5;
-	validPxlHit = muons->at(im).innerTrack()->hitPattern().numberOfValidPixelHits() > 0;
-	highPurity = muons->at(im).innerTrack()->quality(reco::Track::highPurity);
-      }      
-      dPhiCut = std::min(std::max(1.2/muons->at(im).p(),1.2/100),0.032);
-      dPhiBendCut = std::min(std::max(0.2/muons->at(im).p(),0.2/100),0.0041);
-      int isTight = (int) (fabs(muons->at(im).eta()) < 2.4 && vertices->size() > 0 && muon::isTightMuon(muons->at(im),vertices->at(prVtx))) || (fabs(muons->at(im).eta()) > 2.4 && isME0MuonSelNew(muons->at(im), 0.048, dPhiCut, dPhiBendCut, iSetup) && ipxy && ipz && validPxlHit && highPurity);
-
-      if(isTight)
-	muon_idpass[muon_size] |= 1 << 2;
-      //CutBasedIdLoosemuon[muon_size] = muons->at(im).passed(reco::Muon::CutBasedIdLoose);
-      //CutBasedIdMediummuon[muon_size] = muons->at(im).passed(reco::Muon::CutBasedIdMedium);
-      //CutBasedIdTightmuon[muon_size] = muons->at(im).passed(reco::Muon::CutBasedIdTight);
-      //PFIsoLoosemuon[muon_size] = muons->at(im).passed(reco::Muon::PFIsoLoose);
-      //PFIsoMediummuon[muon_size] = muons->at(im).passed(reco::Muon::PFIsoMedium);
-      //
-      //PFIsoTightmuon[muon_size] = muons->at(im).passed(reco::Muon::PFIsoTight);
-         
-      if(muon_reliso[muon_size] < 0.1)
-	muon_isopass[muon_size] |= 1 << 0;
-      
-      if(muon_reliso[muon_size] < 0.2)
-	muon_isopass[muon_size] |= 1 << 1;
-      
-      if(muon_reliso[muon_size] < 0.3)
-	muon_isopass[muon_size] |= 1 << 2;
-      
-      if(muon_reliso[muon_size] < 0.4)
-	muon_isopass[muon_size] |= 1 << 3;
-      
-      muon_size++;
-      if(muon_size>kMaxMuonLoose) break;
-    }
-  
-   if(debug_)   std::cout<<"Here I am : got muon infor right "<<std::endl;
-   //std::cout<<"Muon"<<std::endl;
-   
+//     /////////////////////////////
+//     //Photon information         
+//     /////////////////////////////                                                                                                
+//     for(size_t ip= 0 ; ip < photns->size(); ip++)
+//       {
+//         if(photns->at(ip).pt() < 10.) continue;
+//         if(fabs(photns->at(ip).eta()) > 3.) continue;
+//         float mvaValue = photns->at(ip).userFloat("mvaValue");
+//         bool isEB = photns->at(ip).isEB();
+//         bool isLoose(0), isMedium(0), isTight(0);
+//         
+//         if( isEB )
+//   	{
+//   	  isLoose  = (mvaValue > 0.00);
+//   	  isMedium = (mvaValue > 0.2); 
+//   	  isTight  = (mvaValue > 0.56);
+//   	}     
+//         else
+//   	{
+//   	  isLoose = (mvaValue > 0.20);
+//   	  isMedium = (mvaValue > 0.4); 
+//   	  isTight = (mvaValue > 0.68);
+//   	}          
+//         
+//         gamma_pt[gamma_size]        = photns->at(ip).pt();
+//         gamma_eta[gamma_size]       = photns->at(ip).eta();
+//         gamma_phi[gamma_size]       = photns->at(ip).phi();
+//         gamma_mass[gamma_size]      = photns->at(ip).mass();
+//         gamma_idvar[gamma_size]     = mvaValue; // MVA
+//         gamma_reliso[gamma_size]    = 0.;
+//         gamma_idpass[gamma_size]    = 0;
+//         gamma_isopass[gamma_size]   = 0;
+//         
+//         if(isLoose)
+//   	gamma_idpass[gamma_size] |= 1 << 0;
+//         
+//         if(isMedium)
+//   	gamma_idpass[gamma_size] |= 1 << 1;
+//         
+//         if(isTight)
+//   	gamma_idpass[gamma_size] |= 1 << 2;
+//         
+//         if(gamma_reliso[gamma_size] < 0.1)
+//   	gamma_isopass[gamma_size] |= 1 << 0;
+//         
+//         if(gamma_reliso[gamma_size] < 0.2)
+//   	 gamma_isopass[gamma_size] |= 1 << 1;
+//         
+//         if(gamma_reliso[gamma_size] < 0.3)
+//   	gamma_isopass[gamma_size] |= 1 << 2;
+//         
+//         if(gamma_reliso[gamma_size] < 0.4)
+//   	gamma_isopass[gamma_size] |= 1 << 3;
+//         
+//         gamma_size++;
+//         if(gamma_size>kMaxPhoton) break;
+//       }
+//     if(debug_)   std::cout<<"Here I am : got pho infor right "<<std::endl;
+//     
+//     /////////////////////////////
+//     //Electron information
+//     /////////////////////////////                       
+//     for(size_t ie= 0 ; ie < elecs->size(); ie++)  {
+//       if(elecs->at(ie).pt() < 10.) continue;
+//       if (fabs(elecs->at(ie).eta()) > 3.) continue;
+//       float mvaValue = elecs->at(ie).userFloat("mvaValue");
+//       //float mvaValue = 1.;
+//       elec_pt[elec_size]               = elecs->at(ie).pt();
+//       elec_eta[elec_size]              = elecs->at(ie).eta();
+//       elec_phi[elec_size]              = elecs->at(ie).phi();
+//       elec_mass[elec_size]             = elecs->at(ie).mass();
+//       elec_charge[elec_size]           = elecs->at(ie).charge();
+//       elec_idvar[elec_size]            = mvaValue; //MVA
+//       elec_idpass[elec_size]           = 0;
+//       elec_isopass[elec_size]          = 0;
+//       bool isEB                        = elecs->at(ie).isEB();
+//       if(isEB) 
+//         elec_reliso[elec_size] = (elecs->at(ie).puppiNoLeptonsChargedHadronIso() + elecs->at(ie).puppiNoLeptonsNeutralHadronIso() + elecs->at(ie).puppiNoLeptonsPhotonIso()) / elecs->at(ie).pt();
+//       else 
+//         elec_reliso[elec_size] = (elecs->at(ie).userFloat("hgcElectronID:caloIsoRing1") + elecs->at(ie).userFloat("hgcElectronID:caloIsoRing2") + elecs->at(ie).userFloat("hgcElectronID:caloIsoRing3") + elecs->at(ie).userFloat("hgcElectronID:caloIsoRing4")) / elecs->at(ie).energy();
+//   
+//       bool isLoose(0), isMedium(0), isTight(0);
+//       
+//       if( isEB ) {
+//         if (elecs->at(ie).pt() < 20.) {
+//   	isLoose  = (mvaValue  > -0.661);
+//   	isMedium = (mvaValue > 0.885);
+//   	isTight  = (mvaValue  > 0.986);  	
+//         }
+//         else {
+//   	isLoose  = (mvaValue  > -0.797);
+//   	isMedium = (mvaValue > 0.723);
+//   	isTight  = (mvaValue  > 0.988);
+//         }
+//       }
+//       else {
+//         if (not (elecs->at(ie).userFloat("hgcElectronID:ecEnergy") > 0)) continue;
+//         if (not (elecs->at(ie).userFloat("hgcElectronID:sigmaUU") > 0)) continue;
+//         if (not (elecs->at(ie).fbrem() > -1)) continue;
+//         if (not (elecs->at(ie).userFloat("hgcElectronID:measuredDepth") < 40)) continue;
+//         if (not (elecs->at(ie).userFloat("hgcElectronID:nLayers") > 20)) continue;
+//         if (elecs->at(ie).pt() < 20.) {
+//   	isLoose = (mvaValue  > -0.320);
+//   	isMedium = (mvaValue > 0.777);
+//   	isTight = (mvaValue  > 0.969);
+//         }
+//         else {
+//   	isLoose  = (mvaValue  > -0.919);
+//   	isMedium = (mvaValue > 0.591);
+//   	isTight  = (mvaValue  > 0.983);
+//         }
+//       }
+//       
+//       if(isLoose)
+//         //{
+//   	elec_idpass[elec_size] |= 1 << 0;
+//   	//std::cout<<"loose muon found"<<std::endl;
+//       // }
+//       if(isMedium)
+//         elec_idpass[elec_size] |= 1 << 1;
+//       
+//       if(isTight)
+//         elec_idpass[elec_size] |= 1 << 2;  
+//       
+//       if(elec_reliso[elec_size] < 0.1)
+//         elec_isopass[elec_size] |= 1 << 0;
+//       
+//       if(elec_reliso[elec_size] < 0.2)
+//         elec_isopass[elec_size] |= 1 << 1;
+//       
+//       if(elec_reliso[elec_size] < 0.3)
+//         elec_isopass[elec_size] |= 1 << 2;
+//       
+//       if(elec_reliso[elec_size] < 0.4)
+//         elec_isopass[elec_size] |= 1 << 3;
+//       
+//       elec_size++;
+//       if(elec_size>kMaxElectron) break;
+//     }
+//     
+//     //std::cout<<elec_size<<std::endl;
+//     if(debug_)   std::cout<<"Here I am : got elec infor right "<<std::endl;
+//   
+//    
+//    /////////////////////////////
+//    // Muon information
+//    /////////////////////////////
+//    for(size_t im= 0 ; im < muons->size(); im++)
+//      {
+//        if (muons->at(im).pt() < 2.) continue;
+//        if (fabs(muons->at(im).eta()) > 2.8) continue;
+//        
+//        muon_pt[muon_size]               = muons->at(im).pt();
+//        muon_eta[muon_size]              = muons->at(im).eta();
+//        muon_phi[muon_size]              = muons->at(im).phi();
+//        muon_mass[muon_size]             = muons->at(im).mass();
+//        muon_charge[muon_size]           = muons->at(im).charge();
+//        muon_reliso[muon_size]           = muons->at(im).trackIso()/muons->at(im).pt();
+//        muon_idvar[muon_size]            = 1.0;
+//        muon_idpass[muon_size]           = 0;
+//        muon_isopass[muon_size]          = 0;
+//        double dPhiCut = std::min(std::max(1.2/muons->at(im).p(),1.2/100),0.056);
+//        double dPhiBendCut = std::min(std::max(0.2/muons->at(im).p(),0.2/100),0.0096);
+//        
+//        int isLoose = (int) (fabs(muons->at(im).eta()) < 2.4 && muon::isLooseMuon(muons->at(im))) || (fabs(muons->at(im).eta()) > 2.4 && isME0MuonSelNew(muons->at(im), 0.077, dPhiCut, dPhiBendCut, iSetup));
+//  
+//        if(isLoose)
+//  	muon_idpass[muon_size] |= 1 << 0;
+//  	
+//        int isMedium = isLoose;
+//  
+//        if(isMedium)
+//  	muon_idpass[muon_size] |= 1 << 1;
+//  	      
+//        
+//        bool ipxy = false, ipz = false, validPxlHit = false, highPurity = false;
+//        if (muons->at(im).innerTrack().isNonnull()){
+//  	ipxy = std::abs(muons->at(im).muonBestTrack()->dxy(vertices->at(prVtx).position())) < 0.2;
+//  	ipz = std::abs(muons->at(im).muonBestTrack()->dz(vertices->at(prVtx).position())) < 0.5;
+//  	validPxlHit = muons->at(im).innerTrack()->hitPattern().numberOfValidPixelHits() > 0;
+//  	highPurity = muons->at(im).innerTrack()->quality(reco::Track::highPurity);
+//        }      
+//        dPhiCut = std::min(std::max(1.2/muons->at(im).p(),1.2/100),0.032);
+//        dPhiBendCut = std::min(std::max(0.2/muons->at(im).p(),0.2/100),0.0041);
+//        int isTight = (int) (fabs(muons->at(im).eta()) < 2.4 && vertices->size() > 0 && muon::isTightMuon(muons->at(im),vertices->at(prVtx))) || (fabs(muons->at(im).eta()) > 2.4 && isME0MuonSelNew(muons->at(im), 0.048, dPhiCut, dPhiBendCut, iSetup) && ipxy && ipz && validPxlHit && highPurity);
+//  
+//        if(isTight)
+//  	muon_idpass[muon_size] |= 1 << 2;
+//        //CutBasedIdLoosemuon[muon_size] = muons->at(im).passed(reco::Muon::CutBasedIdLoose);
+//        //CutBasedIdMediummuon[muon_size] = muons->at(im).passed(reco::Muon::CutBasedIdMedium);
+//        //CutBasedIdTightmuon[muon_size] = muons->at(im).passed(reco::Muon::CutBasedIdTight);
+//        //PFIsoLoosemuon[muon_size] = muons->at(im).passed(reco::Muon::PFIsoLoose);
+//        //PFIsoMediummuon[muon_size] = muons->at(im).passed(reco::Muon::PFIsoMedium);
+//        //
+//        //PFIsoTightmuon[muon_size] = muons->at(im).passed(reco::Muon::PFIsoTight);
+//           
+//        if(muon_reliso[muon_size] < 0.1)
+//  	muon_isopass[muon_size] |= 1 << 0;
+//        
+//        if(muon_reliso[muon_size] < 0.2)
+//  	muon_isopass[muon_size] |= 1 << 1;
+//        
+//        if(muon_reliso[muon_size] < 0.3)
+//  	muon_isopass[muon_size] |= 1 << 2;
+//        
+//        if(muon_reliso[muon_size] < 0.4)
+//  	muon_isopass[muon_size] |= 1 << 3;
+//        
+//        muon_size++;
+//        if(muon_size>kMaxMuonLoose) break;
+//      }
+//    
+//     if(debug_)   std::cout<<"Here I am : got muon infor right "<<std::endl;
+//     //std::cout<<"Muon"<<std::endl;
    /////////////////////////////
    // Taus info
    /////////////////////////////
@@ -863,12 +910,37 @@ Validator::analyze(const edm::Event& iEvent, const edm::EventSetup& iSetup)
      tau_chargediso[tau_size]  = taus->at(it).tauID("chargedIsoPtSum");
      tau_neutraliso[tau_size]  = taus->at(it).tauID("neutralIsoPtSumdR03");
      tau_isopass[tau_size]     = 0;
+     tau_t[tau_size] = 9999.;
+     tau_terr[tau_size] = 9999.;
+     tau_dr_match[tau_size] = -9999.;
+     
+     const PFCandidatePtr tlead = taus->at(it).leadPFCand();
+      TLorentzVector tau;
+     if (!tlead){
+      //cout<<"no leadPFCand"<<endl;
+      tau.SetPtEtaPhiE(taus->at(it).pt(),taus->at(it).eta(),taus->at(it).phi(),taus->at(it).energy());
+    }
+     else{
+      //cout<<"LEAD FOUND"<<endl;
+      tau.SetPtEtaPhiE(tlead->pt(),tlead->eta(),tlead->phi(),tlead->energy());
+    }
+      for (size_t ipf = 0; ipf < pfCandids->size(); ipf++){
+       //SONO QUI
+        TLorentzVector pfc;
+        pfc.SetPtEtaPhiE(pfCandids->at(ipf).pt(),pfCandids->at(ipf).eta(),pfCandids->at(ipf).phi(),pfCandids->at(ipf).energy());
+        if (fabs(tau.DeltaR(pfc)>0.005)) continue;
+        //matched
+        //cout<<"matched"<<endl;
+        tau_t[tau_size] = pfCandids->at(ipf).time();
+        tau_terr[tau_size] = pfCandids->at(ipf).timeError();
+        tau_dr_match[tau_size] = tau.DeltaR(pfc);
+        break;
+      }
      
      if (std::abs(tau_eta[tau_size])<1.4)
        tau_combinediso[tau_size]      = tau_chargediso[tau_size] + 0.2*max(0.,tau_neutraliso[tau_size] - 5.);
      else 
        tau_combinediso[tau_size]      = tau_chargediso[tau_size] + 0.2*max(0.,tau_neutraliso[tau_size] - 1.);
-     
      
      if(tau_combinediso[tau_size] < 1.2)
        tau_isopass[tau_size] |= 1 << 0;
@@ -877,11 +949,107 @@ Validator::analyze(const edm::Event& iEvent, const edm::EventSetup& iSetup)
        tau_isopass[tau_size] |= 1 << 1;
 
      if(tau_combinediso[tau_size] < 4.)
-	 tau_isopass[tau_size] |= 1 << 2;
+	     tau_isopass[tau_size] |= 1 << 2;
      
      if(tau_combinediso[tau_size] < 5.)
        tau_isopass[tau_size] |= 1 << 3;
      
+  unsigned int tau_vertex_idxpf=-1;
+  pat::PackedCandidate const* packedLeadTauCand = dynamic_cast<pat::PackedCandidate const*>(taus->at(it).leadChargedHadrCand().get());
+  tau_vertex_idxpf = packedLeadTauCand->vertexRef().key();
+
+
+/*
+////FARE QUI
+  float isoDR03pt08dz015=0;
+  float gamma_DR03sum=0;
+  
+  //vtx4D_t[vtx4D_size]   = vertices4D->at(i).t();
+  //vtx4D_terr[vtx4D_size]   = vertices4D->at(i).tError();
+
+  for(const auto& IsoCand: taus->at(i).isolationChargedHadrCands()){
+    pat::PackedCandidate const* cand = dynamic_cast<pat::PackedCandidate const*>(IsoCand.get());
+    if (! cand->charge() )continue;
+    //WATCH OUT WHICH VERTICES THESE ARE
+    //if(!vertices())continue;
+    //const auto& tau_vertex = (*vertices())[tau_vertex_idxpf];
+    
+    if ((cand->pt()<=0.8) || (fabs(cand->dxy(tau_vertex.position()))>=0.05))continue;
+    if (cand->hasTrackDetails()){
+      const auto &tt = cand->pseudoTrack();
+      if (tt.normalizedChi2()>=100. || cand->numberOfHits()<3)continue;
+    }
+    
+    //TIMING!
+    float Ndelta = 0.;
+    if (applyTiming){
+      //const auto& tau_vertex4D = (*vertices4D())[tau_vertex_idxpf];
+      float terr = cand->timeError();
+      float timing = cand->time();
+      float td4d = tau_vertex4D.t();
+      Ndelta = std::abs(td4d - timing)/terr;
+    }
+    if (reco::deltaR2(taus->at(i),*cand)<0.3*0.3 && fabs(cand->dz(tau_vertex.position()))<0.15 && Ndelta<3){
+     //cout<<"eliminated track pt "<<cand->pt()<<endl;
+     isoDR03pt08dz015+=cand->pt();
+    }
+  }
+
+  for(const auto&  IsoCand: taus->at(i).isolationGammaCands()){
+    pat::PackedCandidate const* cand = dynamic_cast<pat::PackedCandidate const*>(IsoCand.get());
+    if ( cand->pt() < 0.5 ) continue;
+    if (reco::deltaR2(tau,*cand)<0.3*0.3 && cand->pt()>1.){
+      gamma_DR03sum+=cand->pt();
+      }
+  }
+  
+  if ( std::abs(taus->at(i).eta()) < 1.4) return (isoDR03pt08dz015 + 0.2 * std::max(0., gamma_DR03sum - 5.));
+  else return (isoDR03pt08dz015 + 0.2 * std::max(0., gamma_DR03sum - 1.));
+  return 999.;
+
+////FINE QUI
+*/
+if(debug_)   std::cout<<"Here I am : starting custom taus l0 "<<prVtx<<" / "<<tau_vertex_idxpf<<" -> "<<vertices->size()<<" / " <<vertices4D->size()<<std::endl;
+unsigned int vertexToUse = tau_vertex_idxpf;
+bool applyTiming = true;
+reco::Vertex tau_vertexToUse;
+if (vertexToUse>=vertices4D->size())vertexToUse = prVtx;
+if (vertexToUse>=vertices4D->size()){
+  tau_vertexToUse = vertices->at(vertexToUse);
+  applyTiming = false;
+  histFailed4Dv->Fill(0.5);
+}
+else tau_vertexToUse = vertices4D->at(vertexToUse);
+
+tau_customIso[tau_size] = customTauIsolation(taus->at(it), false, vertices->at(vertexToUse),tau_vertexToUse);//prVtx
+if(debug_)   std::cout<<"Here I am : starting custom taus l1"<<std::endl;
+tau_customIsot[tau_size] = customTauIsolation(taus->at(it), applyTiming, vertices->at(vertexToUse),tau_vertexToUse);
+if(debug_)   std::cout<<"Here I am : starting custom taus l2"<<std::endl;
+tau_correctedIso[tau_size] = correctedTauIsolation(taus->at(it), applyTiming, vertices->at(vertexToUse),tau_vertexToUse,tau_combinediso[tau_size]);
+if(debug_)   std::cout<<"Here I am : starting custom taus l3"<<std::endl;
+tau_track_size += fillNDeltas(taus->at(it), applyTiming, vertices->at(vertexToUse),tau_vertexToUse,tau_deltas_track,tau_track_size);
+if(debug_)   std::cout<<"Here I am : done custom taus "<<std::endl;
+tau_againstlead[tau_size] = AgainstLeadTrackTauIsolation(taus->at(it), true,vertices->at(tau_vertex_idxpf));
+
+
+     bool isTauGenMatched = false;
+     TLorentzVector tmpTau;
+     tmpTau.SetPtEtaPhiE(taus->at(it).pt(),taus->at(it).eta(),taus->at(it).phi(),taus->at(it).energy());
+     for (size_t igp = 0; igp < genParts->size(); igp++) {
+      int gen_pid       = genParts->at(igp).pdgId();
+      
+      TLorentzVector tmpGen;
+      tmpGen.SetPtEtaPhiE(genParts->at(igp).pt(),genParts->at(igp).eta(),genParts->at(igp).phi(),genParts->at(igp).energy());
+      if (tmpTau.DeltaR(tmpGen)<0.01){
+        if (abs(gen_pid)==15){
+          isTauGenMatched=true;
+          break;
+        }
+      }
+    }
+     tau_genMatch[tau_size] = isTauGenMatched;
+if(debug_)   std::cout<<"Here I am : done taus gen match "<<std::endl;
+
      tau_size++;
      if(tau_size>kMaxTau) break; 
    }
@@ -1122,7 +1290,191 @@ Validator::isME0MuonSelNew(reco::Muon muon, double dEtaCut, double dPhiCut, doub
 
 }
 
+float Validator::AgainstLeadTrackTauIsolation(const pat::Tau& tau, bool applytiming, reco::Vertex tau_vertex)const{
+// recomputed tau isolation with in time tracks only
 
+//Controllare questa parte con twiki 
+  //unsigned int tau_vertex_idxpf=-1;
+  pat::PackedCandidate const* packedLeadTauCand = dynamic_cast<pat::PackedCandidate const*>(tau.leadChargedHadrCand().get());
+  float  td4d  = 0.;
+  float td4derr = 999.;
+  if (applytiming){
+       td4d = packedLeadTauCand->time();   
+       td4derr =  packedLeadTauCand->timeError();
+  }
+  //tau_vertex_idxpf = packedLeadTauCand->vertexRef().key();
+  
+  float isoDR03pt08dz015=0;
+  float gamma_DR03sum=0;
+  
+  //vtx4D_t[vtx4D_size]   = vertices4D->at(i).t();
+  //vtx4D_terr[vtx4D_size]   = vertices4D->at(i).tError();
+
+  for(const auto& IsoCand: tau.isolationChargedHadrCands()){
+    pat::PackedCandidate const* cand = dynamic_cast<pat::PackedCandidate const*>(IsoCand.get());
+    if (! cand->charge() )continue;
+    //WATCH OUT WHICH VERTICES THESE ARE
+    //if(!vertices())continue;
+    //const auto& tau_vertex = (*vertices())[tau_vertex_idxpf];
+    
+    if ((cand->pt()<=0.8) || (fabs(cand->dxy(tau_vertex.position()))>=0.05))continue;
+    if (cand->hasTrackDetails()){
+      const auto &tt = cand->pseudoTrack();
+      if (tt.normalizedChi2()>=100. || cand->numberOfHits()<3)continue;
+    }
+    
+    //TIMING!
+    float Ndelta = 0.;
+    if (applytiming){
+      //const auto& tau_vertex4D = (*vertices4D())[tau_vertex_idxpf];
+      float terr = cand->timeError();
+      float timing = cand->time();
+      float toterr = td4derr + terr;
+      Ndelta = std::abs(td4d - timing)/toterr;
+    }
+    //if (reco::deltaR2(tau,*cand)<0.3*0.3 && fabs(cand->dz(tau_vertex.position()))<0.15 && Ndelta<3){
+    if (reco::deltaR(tau,*cand)<0.5 && fabs(cand->dz(tau_vertex.position()))<0.15 && Ndelta<3){
+     //cout<<"eliminated track pt "<<cand->pt()<<endl;
+     isoDR03pt08dz015+=cand->pt();
+    }
+}
+
+  for(const auto&  IsoCand: tau.isolationGammaCands()){ 
+    pat::PackedCandidate const* cand = dynamic_cast<pat::PackedCandidate const*>(IsoCand.get());
+    if ( cand->pt() < 0.5 ) continue;
+    //if (reco::deltaR2(tau,*cand)<0.3*0.3 && cand->pt()>1.){
+    if (reco::deltaR(tau,*cand)<0.3 && cand->pt()>1.){
+      gamma_DR03sum+=cand->pt();
+      }
+  }
+
+//return result;
+return (isoDR03pt08dz015 + 0.2 * std::max(0., gamma_DR03sum - 1.));
+}
+
+float Validator::correctedTauIsolation(const pat::Tau& tau, bool applytiming, reco::Vertex tau_vertex, reco::Vertex tau_vertex4D, float pfcombreliso)const{
+//CombRelIso of taus with oot tracks removed
+  float result = pfcombreliso;
+  for(const auto& IsoCand: tau.isolationChargedHadrCands()){
+    pat::PackedCandidate const* cand = dynamic_cast<pat::PackedCandidate const*>(IsoCand.get());
+    if (! cand->charge() )continue;
+    //WATCH OUT WHICH VERTICES THESE ARE
+    //if(!vertices())continue;
+    //const auto& tau_vertex = (*vertices())[tau_vertex_idxpf];
+    
+    if ((cand->pt()<=0.8) || (fabs(cand->dxy(tau_vertex.position()))>=0.05))continue;
+    if (cand->hasTrackDetails()){
+      const auto &tt = cand->pseudoTrack();
+      if (tt.normalizedChi2()>=100. || cand->numberOfHits()<3)continue;
+    }
+    
+    //TIMING!
+    float Ndelta = 0.;
+    if (applytiming){
+      //const auto& tau_vertex4D = (*vertices4D())[tau_vertex_idxpf];
+      float terr = cand->timeError();
+      float timing = cand->time();
+      float td4d = tau_vertex4D.t();
+      Ndelta = std::abs(td4d - timing)/terr;
+  }
+  if(Ndelta>3) result = result - cand->pt();
+    //if (reco::deltaR2(tau,*cand)<0.3*0.3 && fabs(cand->dz(tau_vertex.position()))<0.15 && Ndelta<3){
+  }
+
+  return result;
+}
+
+int Validator::fillNDeltas(const pat::Tau& tau, bool applytiming, reco::Vertex tau_vertex, reco::Vertex tau_vertex4D, int* tau_deltas_track, int currentDeltas){
+  int idelta = currentDeltas;
+    for(const auto& IsoCand: tau.isolationChargedHadrCands()){
+    pat::PackedCandidate const* cand = dynamic_cast<pat::PackedCandidate const*>(IsoCand.get());
+    if (! cand->charge() )continue;
+    //WATCH OUT WHICH VERTICES THESE ARE
+    //if(!vertices())continue;
+    //const auto& tau_vertex = (*vertices())[tau_vertex_idxpf];
+    
+    if ((cand->pt()<=0.8) || (fabs(cand->dxy(tau_vertex.position()))>=0.05))continue;
+    if (cand->hasTrackDetails()){
+      const auto &tt = cand->pseudoTrack();
+      if (tt.normalizedChi2()>=100. || cand->numberOfHits()<3)continue;
+    }
+    
+    //TIMING!
+    float Ndelta = -19.5;
+
+      //const auto& tau_vertex4D = (*vertices4D())[tau_vertex_idxpf];
+      float terr = cand->timeError();
+      float timing = cand->time();
+      if (applytiming){
+      float td4d = tau_vertex4D.t();
+      Ndelta = std::abs(td4d - timing)/terr;
+    }
+      myhisto->Fill(Ndelta);
+      myhistoTimes->Fill(timing);
+      //tau_deltas_track[idelta] = Ndelta;
+      idelta++;
+      if (idelta > kMaxTau*100 )break;
+  }
+  return idelta;
+}
+
+float Validator::customTauIsolation(const pat::Tau& tau, bool applyTiming, reco::Vertex tau_vertex, reco::Vertex tau_vertex4D)const{
+// recomputed tau isolation with in time tracks only
+
+//Controllare questa parte con twiki 
+  //unsigned int tau_vertex_idxpf=-1;
+  //pat::PackedCandidate const* packedLeadTauCand = dynamic_cast<pat::PackedCandidate const*>(tau.leadChargedHadrCand().get());
+  //tau_vertex_idxpf = packedLeadTauCand->vertexRef().key();
+  
+  float isoDR03pt08dz015=0;
+  float gamma_DR03sum=0;
+  
+  //vtx4D_t[vtx4D_size]   = vertices4D->at(i).t();
+  //vtx4D_terr[vtx4D_size]   = vertices4D->at(i).tError();
+
+  for(const auto& IsoCand: tau.isolationChargedHadrCands()){
+    pat::PackedCandidate const* cand = dynamic_cast<pat::PackedCandidate const*>(IsoCand.get());
+    if (! cand->charge() )continue;
+    //WATCH OUT WHICH VERTICES THESE ARE
+    //if(!vertices())continue;
+    //const auto& tau_vertex = (*vertices())[tau_vertex_idxpf];
+    
+    if ((cand->pt()<=0.8) || (fabs(cand->dxy(tau_vertex.position()))>=0.05))continue;
+    if (cand->hasTrackDetails()){
+      const auto &tt = cand->pseudoTrack();
+      if (tt.normalizedChi2()>=100. || cand->numberOfHits()<3)continue;
+    }
+    
+    //TIMING!
+    float Ndelta = 0.;
+    if (applyTiming){
+      //const auto& tau_vertex4D = (*vertices4D())[tau_vertex_idxpf];
+      float terr = cand->timeError();
+      float timing = cand->time();
+      float td4d = tau_vertex4D.t();
+      Ndelta = std::abs(td4d - timing)/terr;
+    }
+    //if (reco::deltaR2(tau,*cand)<0.3*0.3 && fabs(cand->dz(tau_vertex.position()))<0.15 && Ndelta<3){
+    if (reco::deltaR(tau,*cand)<0.5 && fabs(cand->dz(tau_vertex.position()))<0.15 && Ndelta<3){
+     //cout<<"eliminated track pt "<<cand->pt()<<endl;
+     isoDR03pt08dz015+=cand->pt();
+    }
+  }
+
+  for(const auto&  IsoCand: tau.isolationGammaCands()){ 
+    pat::PackedCandidate const* cand = dynamic_cast<pat::PackedCandidate const*>(IsoCand.get());
+    if ( cand->pt() < 0.5 ) continue;
+    //if (reco::deltaR2(tau,*cand)<0.3*0.3 && cand->pt()>1.){
+    if (reco::deltaR(tau,*cand)<0.3 && cand->pt()>1.){
+      gamma_DR03sum+=cand->pt();
+      }
+  }
+  
+  if ( std::abs(tau.eta()) < 1.4) return (isoDR03pt08dz015 + 0.2 * std::max(0., gamma_DR03sum - 5.));
+  else return (isoDR03pt08dz015 + 0.2 * std::max(0., gamma_DR03sum - 1.));
+  return 999.;
+  
+}
 ////Jan's code//
 float Validator::calculate_demetraIsolation(const pat::Tau& tau)const{
   /*  unsigned int tau_vertex_idxpf=-1;
@@ -1137,29 +1489,29 @@ float Validator::calculate_demetraIsolation(const pat::Tau& tau)const{
     pat::PackedCandidate const* cand = dynamic_cast<pat::PackedCandidate const*>(IsoCand.get());
     if (! cand->charge() )continue;
     //WATCH OUT WHICH VERTICES THESE ARE
-    /*if(!vertices())continue;
-    const auto& tau_vertex = (*vertices())[tau_vertex_idxpf];
-    
-    if ((cand->pt()<=0.8) || (fabs(cand->dxy(tau_vertex.position()))>=0.05))continue;
-    if (cand->hasTrackDetails()){
-      const auto &tt = cand->pseudoTrack();
-      if (tt.normalizedChi2()>=100. || cand->numberOfHits()<3)continue;
-    }
-    
-    if (reco::deltaR2(tau,*cand)<0.3*0.3
-	&& fabs(cand->dz(tau_vertex.position()))<0.15){
-	   
-	   isoDR03pt08dz015+=cand->pt();
-    }
-  }
-  for(const auto&  IsoCand: tau.isolationGammaCands()){
-    pat::PackedCandidate const* cand = dynamic_cast<pat::PackedCandidate const*>(IsoCand.get());
-    if ( cand->pt() < 0.5 ) continue;
-    if (reco::deltaR2(tau,*cand)<0.3*0.3 && cand->pt()>1.){
-      gamma_DR03sum+=cand->pt();
-      }
-  }
-  */
+//    if(!vertices())continue;
+//    const auto& tau_vertex = (*vertices())[tau_vertex_idxpf];
+//    
+//    if ((cand->pt()<=0.8) || (fabs(cand->dxy(tau_vertex.position()))>=0.05))continue;
+//    if (cand->hasTrackDetails()){
+//      const auto &tt = cand->pseudoTrack();
+//      if (tt.normalizedChi2()>=100. || cand->numberOfHits()<3)continue;
+//    }
+//    
+//    if (reco::deltaR2(tau,*cand)<0.3*0.3
+//	&& fabs(cand->dz(tau_vertex.position()))<0.15){
+//	   
+//	   isoDR03pt08dz015+=cand->pt();
+//    }
+//  }
+//  for(const auto&  IsoCand: tau.isolationGammaCands()){
+//    pat::PackedCandidate const* cand = dynamic_cast<pat::PackedCandidate const*>(IsoCand.get());
+//    if ( cand->pt() < 0.5 ) continue;
+//    if (reco::deltaR2(tau,*cand)<0.3*0.3 && cand->pt()>1.){
+//      gamma_DR03sum+=cand->pt();
+//      }
+//  }
+//  */
   // if ( std::abs(cand->eta()) < 1.4) return (isoDR03pt08dz015 + 0.2 * std::max(0., gamma_DR03sum - 5.));
   // else return (isoDR03pt08dz015 + 0.2 * std::max(0., gamma_DR03sum - 1.));
   return 1.;
