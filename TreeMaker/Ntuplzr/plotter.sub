@@ -1,0 +1,31 @@
+executable              = plotter.sh
+arguments		= $(infile) $(pileup) $(genmatch)
+output                  = /afs/cern.ch/user/g/gortona/work/Phase2/CMSSW_11_1_0_pre6/src/TreeMaker/Ntuplzr/$(ClusterId).out
+#output/$(ClusterId).$(ProcId).out
+error                   = /afs/cern.ch/user/g/gortona/work/Phase2/CMSSW_11_1_0_pre6/src/TreeMaker/Ntuplzr/error/$(ClusterId).$(ProcId).err
+log                     = /afs/cern.ch/user/g/gortona/work/Phase2/CMSSW_11_1_0_pre6/src/TreeMaker/Ntuplzr/log/$(ClusterId).log
+Initialdir              = /afs/cern.ch/user/g/gortona/work/Phase2/CMSSW_11_1_0_pre6/src/TreeMaker/Ntuplzr
+
+request_memory          = 4000M
++JobFlavour             = "longlunch"
+
+x509userproxy           = /afs/cern.ch/user/g/gortona/x509up_u49999
+
+#https://www-auth.cs.wisc.edu/lists/htcondor-users/2010-September/msg00009.shtml
+periodic_remove         = JobStatus == 5
+
+ShouldTransferFiles     = YES
+
+queue infile,pileup,genmatch  from (
+ttbar 200 0
+ttbar 200 1
+ttbar 0 0
+ttbar 0 1
+qcd 200 0
+qcd 200 1
+qcd 0 0
+qcd 0 1
+)
+#queue infile in (dy dy0 qcd qcd0 singleTau singleTau0 ttbar ttbar0)
+#queue infile in (singleTau singleTau0)
+

@@ -1,0 +1,50 @@
+executable              = test.sh
+arguments				= $(inFile) $(bunchnumber)
+output                  = /afs/cern.ch/user/g/gortona/work/Phase2/CMSSW_11_1_0_pre6/src/TreeMaker/Ntuplzr/$(ClusterId).out
+#output/$(ClusterId).$(ProcId).out
+error                   = /afs/cern.ch/user/g/gortona/work/Phase2/CMSSW_11_1_0_pre6/src/TreeMaker/Ntuplzr/error/$(ClusterId).$(ProcId).err
+log                     = /afs/cern.ch/user/g/gortona/work/Phase2/CMSSW_11_1_0_pre6/src/TreeMaker/Ntuplzr/log/$(ClusterId).log
+Initialdir              = /afs/cern.ch/user/g/gortona/work/Phase2/CMSSW_11_1_0_pre6/src/TreeMaker/Ntuplzr
+
+request_memory          = 4000M
++JobFlavour             = "tomorrow"
+
+x509userproxy           = /afs/cern.ch/user/g/gortona/x509up_u49999
+
+#https://www-auth.cs.wisc.edu/lists/htcondor-users/2010-September/msg00009.shtml
+periodic_remove         = JobStatus == 5
+
+ShouldTransferFiles     = YES
+
+queue infile bunchnumber from (
+Htautau140 0
+Htautau140 1
+Htautau140 2
+Htautau140 3
+Htautau140 4
+Htautau140 5
+Htautau140 6
+Htautau140 7
+Htautau140 8
+Htautau140 9
+Htautau140 10
+Htautau140 11
+Htautau140 12
+Htautau140 13
+Htautau140 14
+Htautau140 15
+Htautau0 0
+Htautau0 1
+Htautau0 2
+Htautau0 3
+Htautau0 4
+multiTau200 0
+multiTau200 1
+multiTau200 2
+multiTau200 3
+multiTau200 4
+multiTau0 0
+)
+#queue infile in (dy dy0 qcd qcd0 singleTau singleTau0 ttbar ttbar0 ttbarnarrowBS)
+#queue infile in (dy qcd)
+

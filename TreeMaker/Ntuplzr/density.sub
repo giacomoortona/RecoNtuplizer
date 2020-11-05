@@ -1,0 +1,80 @@
+executable              = density.sh
+arguments		        = $(samples) $(threshold) $(pileup) $(genmatch)
+output                  = /afs/cern.ch/user/g/gortona/work/Phase2/CMSSW_11_1_0_pre6/src/TreeMaker/Ntuplzr/$(ClusterId).out
+#output/$(ClusterId).$(ProcId).out
+error                   = /afs/cern.ch/user/g/gortona/work/Phase2/CMSSW_11_1_0_pre6/src/TreeMaker/Ntuplzr/error/$(ClusterId).$(ProcId).err
+log                     = /afs/cern.ch/user/g/gortona/work/Phase2/CMSSW_11_1_0_pre6/src/TreeMaker/Ntuplzr/log/$(ClusterId).log
+Initialdir              = /afs/cern.ch/user/g/gortona/work/Phase2/CMSSW_11_1_0_pre6/src/TreeMaker/Ntuplzr
+
+request_memory          = 6000M
++JobFlavour             = "tomorrow"
+
+#x509userproxy           = /afs/cern.ch/user/g/gortona/x509up_u49999
+
+#https://www-auth.cs.wisc.edu/lists/htcondor-users/2010-September/msg00009.shtml
+periodic_remove         = JobStatus == 5
+
+ShouldTransferFiles     = YES
+
+queue samples,threshold,pileup,genmatch  from (
+htautau 2.0 0 0
+htautau 2.0 0 1
+htautau 2.0 140 0
+htautau 2.0 140 1
+htautau 2.0 300 0
+htautau 2.0 300 1
+htautau 2.5 0 0
+htautau 2.5 0 1
+htautau 2.5 140 0
+htautau 2.5 140 1
+htautau 2.5 300 0
+htautau 2.5 300 1
+multitau 2.0 0 0
+multitau 2.0 0 1
+multitau 2.0 200 0
+multitau 2.0 200 1
+multitau 2.0 300 0
+multitau 2.0 300 1
+multitau 2.5 0 0
+multitau 2.5 0 1
+multitau 2.5 200 0
+multitau 2.5 200 1
+multitau 2.5 300 0
+multitau 2.5 300 1
+)
+
+#queue samples,threshold,pileup,genmatch  from (
+#dy 2.0 0 0
+#dy 2.0 0 1
+#dy 2.0 200 0
+#dy 2.0 200 1
+#dy 2.0 300 0
+#dy 2.0 300 1
+#dy 2.5 0 0
+#dy 2.5 0 1
+#dy 2.5 200 0
+#dy 2.5 200 1
+#dy 2.5 300 0
+#dy 2.5 300 1
+#ttbar 2.0 0 0
+#ttbar 2.0 0 1
+#ttbar 2.0 200 0
+#ttbar 2.0 200 1
+#ttbar 2.0 300 0
+#ttbar 2.0 300 1
+#ttbar 2.0 400 0
+#ttbar 2.0 400 1
+#ttbar 2.5 0 0
+#ttbar 2.5 0 1
+#ttbar 2.5 200 0
+#ttbar 2.5 200 1
+#ttbar 2.5 300 0
+#ttbar 2.5 300 1
+#ttbar 2.5 400 0
+#ttbar 2.5 400 1
+#)
+
+
+#queue infile in (dy dy0 qcd qcd0 singleTau singleTau0 ttbar ttbar0)
+#queue infile in (singleTau singleTau0)
+
